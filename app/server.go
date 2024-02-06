@@ -17,8 +17,9 @@ type Data struct {
 }
 
 type KV struct {
-	Key   string
-	Value string
+	Key    string
+	Value  string
+	Expiry int64
 }
 
 var db = make(map[string]Data)
@@ -90,12 +91,13 @@ func handleConn(conn net.Conn) {
 				value := readKVs(directory + "/" + fileName)
 				res := ""
 				for _, kv := range value {
-					if kv.Key == key {
+					if kv.Expiry > 0 && kv.Expiry <= time.Now().UnixMilli() {
+						res += "$-1\r\n"
+					} else {
 						res += "$" + strconv.Itoa(len(kv.Value)) + "\r\n" + kv.Value + "\r\n"
 					}
 				}
 				response = res
-				// response = "$" + strconv.Itoa(len(value)) + "\r\n" + value + "\r\n"
 			} else {
 				if val.Expiry > 0 && val.Expiry <= time.Now().UnixMilli() {
 					delete(db, key)
@@ -150,22 +152,52 @@ func readKVs(path string) []KV {
 	dbContent := parseTable(content)
 	index := 1
 
+	var expiries []int64
+
+	for i := 0; i < len(dbContent); {
+		if dbContent[i] == 252 {
+			var expiry int64
+			for j := 0; j < 8; j++ {
+				expiry |= int64(dbContent[i+j+1]) << (8 * uint(j))
+			}
+			expiries = append(expiries, expiry)
+			dbContent = append(dbContent[:i], dbContent[i+9:]...)
+		} else {
+			i++
+		}
+	}
+
+	cleanedArray := make([]byte, 0)
+	for _, b := range dbContent {
+		if b != 252 {
+			cleanedArray = append(cleanedArray, b)
+		}
+	}
+
 	var kvChunks [][]byte
-	for index < len(dbContent) {
+	for index < len(cleanedArray) {
 		nextZeroIndex := index
-		for nextZeroIndex < len(dbContent) && dbContent[nextZeroIndex] != 0 {
+		for nextZeroIndex < len(cleanedArray) && cleanedArray[nextZeroIndex] != 0 {
 			nextZeroIndex++
 		}
 		if nextZeroIndex > index {
-			kvChunks = append(kvChunks, dbContent[index:nextZeroIndex])
+			if (len(cleanedArray[index:nextZeroIndex])) > 1 { //trim junk value
+				kvChunks = append(kvChunks, cleanedArray[index:nextZeroIndex])
+			}
 		}
 		index = nextZeroIndex + 1
 	}
 
 	var keys []KV
-	for _, value := range kvChunks {
+	for i, value := range kvChunks {
 		keyLen := value[0]
-		keys = append(keys, KV{string(value[1 : keyLen+1]), string(value[keyLen+2:])})
+		var expiry int64
+		if len(expiries) > 0 {
+			expiry = expiries[i]
+		} else {
+			expiry = 0
+		}
+		keys = append(keys, KV{string(value[1 : keyLen+1]), string(value[keyLen+2:]), expiry})
 	}
 	return keys
 }
