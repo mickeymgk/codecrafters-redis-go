@@ -16,78 +16,9 @@ type Data struct {
 	Expiry int64
 }
 
-var db = make(map[string]Data)
-var directory = ""
-var fileName = ""
-
-func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
-	dir := flag.String("dir", "", "The directory where RDB files are stored")
-	dbfilename := flag.String("dbfilename", "", "The name of the RDB file")
-
-	flag.Parse()
-
-	fmt.Println("dir:", *dir)
-	fmt.Println("dbfilename:", *dbfilename)
-	directory = *dir
-	fileName = *dbfilename
-
-	// Uncomment this block to pass the first stage
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
-	if err != nil {
-		fmt.Println("Failed to bind to port 6379")
-		os.Exit(1)
-	}
-	defer l.Close()
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
-			os.Exit(1)
-		}
-		go handleConn(conn)
-	}
-}
-
-func handleConn(conn net.Conn) {
-	buf := make([]byte, 1024)
-	for {
-		_, err := conn.Read(buf)
-		if err != nil {
-			fmt.Println("Error reading from client: ", err.Error())
-			return
-		}
-		str := string(buf)
-		fmt.Println("comm :", str)
-		response := ""
-		chunks := strings.Split(str, "\r\n")
-		command := chunks[2]
-		switch command {
-		case "echo":
-			response = "+" + chunks[4] + "\r\n"
-		case "set":
-			key := chunks[4]
-			value := chunks[6]
-			unixMilli := time.Now().UnixMilli()
-			offset, _ := strconv.ParseInt(chunks[len(chunks)-2], 10, 64)
-			if offset > 0 {
-package main
-
-import (
-	"fmt"
-	// Uncomment this block to pass the first stage
-	"flag"
-	"net"
-	"os"
-	"strconv"
-	"strings"
-	"time"
-)
-
-type Data struct {
-	Value  string
-	Expiry int64
+type KV struct {
+	Key   string
+	Value string
 }
 
 var db = make(map[string]Data)
@@ -172,8 +103,13 @@ func handleConn(conn net.Conn) {
 			}
 		case "keys":
 			if chunks[4] == "*" {
-				content := readKey(directory + "/" + fileName)
-				response = "*1\r\n$" + strconv.Itoa(len(content)) + "\r\n" + content + "\r\n"
+				content := readKeys(directory + "/" + fileName)
+				res := "*" + strconv.Itoa(len(content))
+				for _, kv := range content {
+					res += "\r\n$" + strconv.Itoa(len(kv.Key)) + "\r\n" + kv.Key
+				}
+				res += "\r\n"
+				response = res
 			}
 		default:
 			response = "+PONG\r\n"
@@ -197,15 +133,35 @@ func parseTable(bytes []byte) []byte {
 	return bytes[start+1 : end]
 }
 
-func readKey(path string) string {
+func readKeys(path string) []KV {
 	content, _ := os.ReadFile(path)
 	fmt.Println("MAGIC", string(content[:5]))
 	fmt.Println("VERSION", string(content[5:9]))
 	fmt.Println("TABLE", parseTable(content))
-	key := parseTable(content)
-	len := key[3]
-	str := key[4 : 4+len]
-	return string(str)
+	fmt.Println("STRING", string(parseTable(content)))
+
+	dbContent := parseTable(content)
+	index := 1
+
+	var kvChunks [][]byte
+	for index < len(dbContent) {
+		nextZeroIndex := index
+		for nextZeroIndex < len(dbContent) && dbContent[nextZeroIndex] != 0 {
+			nextZeroIndex++
+		}
+		if nextZeroIndex > index {
+			kvChunks = append(kvChunks, dbContent[index:nextZeroIndex])
+		}
+		index = nextZeroIndex + 1
+	}
+
+	var keys []KV
+	for _, value := range kvChunks {
+		keyLen := value[0]
+		keys = append(keys, KV{string(value[1 : keyLen+1]), string(value[keyLen+2:])})
+	}
+
+	return keys
 }
 
 func readValue(path string) string {
