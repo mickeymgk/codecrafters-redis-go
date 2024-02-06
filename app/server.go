@@ -87,8 +87,15 @@ func handleConn(conn net.Conn) {
 			key := chunks[4]
 			val := db[key]
 			if fileName != "" {
-				value := readValue(directory + "/" + fileName)
-				response = "$" + strconv.Itoa(len(value)) + "\r\n" + value + "\r\n"
+				value := readKVs(directory + "/" + fileName)
+				res := ""
+				for _, kv := range value {
+					if kv.Key == key {
+						res += "$" + strconv.Itoa(len(kv.Value)) + "\r\n" + kv.Value + "\r\n"
+					}
+				}
+				response = res
+				// response = "$" + strconv.Itoa(len(value)) + "\r\n" + value + "\r\n"
 			} else {
 				if val.Expiry > 0 && val.Expiry <= time.Now().UnixMilli() {
 					delete(db, key)
@@ -103,7 +110,7 @@ func handleConn(conn net.Conn) {
 			}
 		case "keys":
 			if chunks[4] == "*" {
-				content := readKeys(directory + "/" + fileName)
+				content := readKVs(directory + "/" + fileName)
 				res := "*" + strconv.Itoa(len(content))
 				for _, kv := range content {
 					res += "\r\n$" + strconv.Itoa(len(kv.Key)) + "\r\n" + kv.Key
@@ -133,7 +140,7 @@ func parseTable(bytes []byte) []byte {
 	return bytes[start+1 : end]
 }
 
-func readKeys(path string) []KV {
+func readKVs(path string) []KV {
 	content, _ := os.ReadFile(path)
 	fmt.Println("MAGIC", string(content[:5]))
 	fmt.Println("VERSION", string(content[5:9]))
@@ -160,14 +167,5 @@ func readKeys(path string) []KV {
 		keyLen := value[0]
 		keys = append(keys, KV{string(value[1 : keyLen+1]), string(value[keyLen+2:])})
 	}
-
 	return keys
-}
-
-func readValue(path string) string {
-	content, _ := os.ReadFile(path)
-	key := parseTable(content)
-	len := key[3]
-	str := key[4+len+1:]
-	return string(str)
 }
