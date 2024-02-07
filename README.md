@@ -33,4 +33,4 @@ Note: This section is for stages 2 and beyond.
 1. Commit your changes and run `git push origin master` to submit your solution
    to CodeCrafters. Test output will be streamed to your terminal.
 
-**Note**: My solutions might not be optimal as I'm a newbie in GoLang! 
+**Note**: My solutions are not optimized as I'm a newbie to GoLang! 
